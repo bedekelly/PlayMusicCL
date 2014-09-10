@@ -58,10 +58,12 @@ class StreamPlayer:
 def notify(txt):
     print(txt)
 
+
 def term_width():
     import os
     rows, columns = os.popen('stty size', 'r').read().split()
     return columns
+
 
 def get_device_id(username, password):
     """Handles retrieving an android device ID to enable streaming."""
@@ -76,6 +78,7 @@ def get_device_id(username, password):
         for device in devices:
             if device['type'] == 'PHONE':
                 return str(device['id'])[2:]
+
 
 class Player:
     def __init__(self, username, password):
@@ -95,9 +98,16 @@ class Player:
     def beginloop(self):
         self.play_stream()
         while True:
-            s = "\rNow playing: {s[title]} by {s[artist]}".format(
-                    s=self.song
-                    )
+            os.system('setterm -cursor off')
+            try:
+                s = "\rNow playing: {s[title]} by {s[artist]}".format(
+                        s=self.song
+                        )
+            except UnicodeError:
+                self.get_random_song()
+                s = "\rNow playing: {s[title]} by {s[artist]}".format(
+                        s=self.song
+                        )
             s += " " * (int(term_width()) - len(s) - 1)
             sys.stdout.write(s)
             sys.stdout.flush()
@@ -114,6 +124,27 @@ class Player:
             elif user_key == "n":
                 self.stream_player.stop()
                 self.get_random_song()
+                self.play_stream()
+            elif user_key == "s":
+                try:
+                    # Screw x-compatibility.
+                    os.system('setterm -cursor on')
+                    search_text = raw_input("\nSearch: ")
+                    os.system('setterm -cursor off')
+                except (EOFError, KeyboardInterrupt):
+                    continue
+                matching_songs = []
+                for song in self.api.get_all_songs():
+                    if any([search_text.lower() in song['title'].lower(),
+                           search_text.lower() in song['artist'].lower(),
+                           search_text.lower() in song['album'].lower()]):
+                        matching_songs.append(song)
+                        break
+                else:
+                    print("None found")
+                    continue
+                self.stream_player.stop()
+                self.song = matching_songs[0]
                 self.play_stream()
             elif user_key == "q":
                 break
@@ -134,7 +165,6 @@ class Player:
         self.play_url(stream_url)
 
 
-
 def disable_warnings():
     import requests.packages.urllib3 as urllib3
     urllib3.disable_warnings()
@@ -142,11 +172,20 @@ def disable_warnings():
 
 def main():
     disable_warnings()
-    username = raw_input("Username: ")
-    notify("A password is required to use Google Music.")
-    password = getpass()
-    player = Player(username, password)
-    player.beginloop()
+    while True:
+        username = raw_input("Username: ")
+        # notify("A password is required to use Google Music.")
+        password = getpass()
+        try:
+            player = Player(username, password)
+            player.beginloop()
+        except gmusicapi.exceptions.NotLoggedIn:
+            print("Login details were incorrect or Google blocked a login " +
+                  "attempt. Please check your email.")
+        else:
+            break
+    print
+
 
 if __name__ == "__main__":
     # Implement 
