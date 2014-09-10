@@ -1,6 +1,7 @@
 #!/usr/bin/env python2
 
 from getpass import getpass
+from time import sleep
 import gmusicapi
 import random
 import pygst
@@ -8,6 +9,7 @@ import gst
 import sys
 import os
 
+MESSAGE_TIMEOUT = 3  # seconds
 
 class GetchUnix:
     """Implements getch for unix systems. Thanks StackOverflow."""
@@ -101,8 +103,7 @@ class Player:
             os.system('setterm -cursor off')
             try:
                 s = "\rNow playing: {s[title]} by {s[artist]}".format(
-                        s=self.song
-                        )
+                        s=self.song)
             except UnicodeError:
                 self.get_random_song()
                 s = "\rNow playing: {s[title]} by {s[artist]}".format(
@@ -141,7 +142,9 @@ class Player:
                         matching_songs.append(song)
                         break
                 else:
-                    print("None found")
+                    sys.stdout.write("\rNo results found.      ")
+                    sys.stdout.flush()
+                    sleep(MESSAGE_TIMEOUT)
                     continue
                 self.stream_player.stop()
                 self.song = matching_songs[0]
@@ -184,6 +187,7 @@ def main():
                   "attempt. Please check your email.")
         else:
             break
+    os.system('setterm -cursor on')
     print
 
 
