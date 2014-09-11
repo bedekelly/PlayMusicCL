@@ -1,10 +1,13 @@
 #!/usr/bin/env python2
 
+from threading import Thread
 from getpass import getpass
 from time import sleep
 import gmusicapi
+import readline
 import random
 import pygst
+import glib
 import gst
 import sys
 import os
@@ -30,10 +33,18 @@ class GetchUnix:
 
 class StreamPlayer:
     """Handles the control of playbin2 from the gst library."""
-    def __init__(self, URI):
+    def __init__(self, URI, main_player):
         self._player = gst.element_factory_make("playbin2", "player")
         self.change_song(URI)
         self.playing = False
+        watcher = Thread(target=self.player_watch_thread, args=(main_player,))
+        watcher.start()
+
+    def player_watch_thread(self, main_player):  # FIXME
+        self.bus = self._player.get_bus()
+        self.bus.add_signal_watch()
+        self.bus.connect("message", main_player.handle_song_end)
+        # glib.MainLoop().run()
 
     def change_song(self, URI):
         self._player.set_property('uri', URI)
@@ -102,13 +113,16 @@ class Player:
         while True:
             os.system('setterm -cursor off')
             try:
-                s = "\rNow playing: {s[title]} by {s[artist]}".format(
-                        s=self.song)
-            except UnicodeError:
-                self.get_random_song()
-                s = "\rNow playing: {s[title]} by {s[artist]}".format(
-                        s=self.song
-                        )
+                s = unicode("\rNow playing: {s[title]} by {s[artist]}".format(
+                        s=self.song))
+            except UnicodeEncodeError:
+                import unicodedata
+                def strip_accents(s):
+                    return ''.join(c for c in unicodedata.normalize('NFD', s) 
+                        if unicodedata.category(c) != 'Mn')
+                s = "\rNow playing: {} by {}".format(
+                        strip_accents(self.song['title']),
+                        strip_accents(self.song['artist']))
             s += " " * (int(term_width()) - len(s) - 1)
             sys.stdout.write(s)
             sys.stdout.flush()
@@ -138,16 +152,18 @@ class Player:
                 for song in self.api.get_all_songs():
                     if any([search_text.lower() in song['title'].lower(),
                            search_text.lower() in song['artist'].lower(),
-                           search_text.lower() in song['album'].lower()]):
+                           # search_text.lower() in song['album'].lower()
+                           ]):
                         matching_songs.append(song)
-                        break
-                else:
+                        
+                if not matching_songs:
                     sys.stdout.write("\rNo results found.      ")
                     sys.stdout.flush()
                     sleep(MESSAGE_TIMEOUT)
                     continue
                 self.stream_player.stop()
-                self.song = matching_songs[0]
+                self.song = random.choice(matching_songs)  # FIXME
+                # self.song = matching_songs[1]
                 self.play_stream()
             elif user_key == "q":
                 break
@@ -156,7 +172,7 @@ class Player:
         return self.api.login(self.username, self.password)
 
     def play_url(self, stream_url):
-        self.stream_player = StreamPlayer(stream_url)
+        self.stream_player = StreamPlayer(stream_url, self)
         self.stream_player.play()
 
     def get_random_song(self):
@@ -167,6 +183,8 @@ class Player:
         stream_url = self.api.get_stream_url(self.song['id'], self.device_id)
         self.play_url(stream_url)
 
+    def handle_song_end(self):
+        self.get_random_song()
 
 def disable_warnings():
     import requests.packages.urllib3 as urllib3
@@ -180,7 +198,7 @@ def main():
         # notify("A password is required to use Google Music.")
         password = getpass()
         try:
-            player = Player(username, password)
+            player = Player("bedekelly97", "0p3n_5354m3")
             player.beginloop()
         except gmusicapi.exceptions.NotLoggedIn:
             print("Login details were incorrect or Google blocked a login " +
