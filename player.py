@@ -112,17 +112,30 @@ class Player:
         self.play_stream()
         while True:
             os.system('setterm -cursor off')
-            try:
-                s = unicode("\rNow playing: {s[title]} by {s[artist]}".format(
-                        s=self.song))
-            except UnicodeEncodeError:
-                import unicodedata
-                def strip_accents(s):
-                    return ''.join(c for c in unicodedata.normalize('NFD', s) 
-                        if unicodedata.category(c) != 'Mn')
-                s = "\rNow playing: {} by {}".format(
-                        strip_accents(self.song['title']),
-                        strip_accents(self.song['artist']))
+            if not self.paused:
+                try:
+                    s = unicode("\r[Playing] {s[title]} by {s[artist]}".format(
+                                s=self.song))
+                except UnicodeEncodeError:
+                    import unicodedata
+                    def strip_accents(s):
+                        return ''.join(c for c in unicodedata.normalize('NFD', s) 
+                            if unicodedata.category(c) != 'Mn')
+                    s = "\r[Playing] {} by {}".format(
+                            strip_accents(self.song['title']),
+                            strip_accents(self.song['artist']))
+            else:
+                try:
+                    s = unicode("\r[Paused]  {s[title]} by {s[artist]}".format(
+                            s=self.song))
+                except UnicodeEncodeError:
+                    import unicodedata
+                    def strip_accents(s):
+                        return ''.join(c for c in unicodedata.normalize('NFD', s) 
+                            if unicodedata.category(c) != 'Mn')
+                    s = "\r[Paused]  {} by {}".format(
+                            strip_accents(self.song['title']),
+                            strip_accents(self.song['artist']))
             s += " " * (int(term_width()) - len(s) - 1)
             sys.stdout.write(s)
             sys.stdout.flush()
@@ -130,12 +143,6 @@ class Player:
             if user_key == " ":
                 self.paused = not self.paused
                 self.stream_player.toggle()
-                if self.paused:
-                    sys.stdout.write("\rPaused:     ")
-                    sys.stdout.flush()
-                else:
-                    sys.stdout.write("\rNow playing:")
-                    sys.stdout.flush()
             elif user_key == "n":
                 self.stream_player.stop()
                 self.get_random_song()
