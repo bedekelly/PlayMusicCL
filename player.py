@@ -198,7 +198,7 @@ def main():
         # notify("A password is required to use Google Music.")
         password = getpass()
         try:
-            player = Player("bedekelly97", "0p3n_5354m3")
+            player = Player(username, password)
             player.beginloop()
         except gmusicapi.exceptions.NotLoggedIn:
             print("Login details were incorrect or Google blocked a login " +
