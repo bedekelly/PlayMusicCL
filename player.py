@@ -217,7 +217,7 @@ def main():
 
 
 if __name__ == "__main__":
-    # Implement 
+    # Implement single-character grabbing from stdin.
     try:
         from msvcrt import getch
     except ImportError:
