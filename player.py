@@ -91,6 +91,8 @@ def get_device_id(username, password):
         for device in devices:
             if device['type'] == 'PHONE':
                 return str(device['id'])[2:]
+        with open("device_id", "w") as id_file:
+            id_file.write(str(device['id']))
 
 
 class Player:
