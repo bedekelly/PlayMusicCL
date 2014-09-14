@@ -164,8 +164,16 @@ class Player:
                 self.previous_song()
             elif user_key == "Q":
                 break
+            elif user_key == "a":
+                self.search_library("add")
             elif user_key == "s":
-                self.search_library()
+                self.search_library("play")
+            elif user_key == "c":
+                self.playlist = [self.playlist[-1]]
+                self.pl_pos = 0
+            elif user_key = "C":
+                self.playlist = []
+                self.pl_pos = 0
 
     def handle_song_end(self, bus, message):
         if message.type == Gst.MessageType.EOS:
@@ -186,7 +194,7 @@ class Player:
             self.song = self.playlist[self.pl_pos]
             self.play_song()
 
-    def search_library(self):
+    def search_library(self, action="play"):
         try:
             # Screw x-compatibility.
             os.system('setterm -cursor on')
@@ -207,7 +215,11 @@ class Player:
             sys.stdout.flush()
             sleep(MESSAGE_TIMEOUT)
             return
-        self.playlist.append(TextMenu(matching_songs).show())  # FIXME
+        self.playlist.append(TextMenu(matching_songs).show())
+        if action == "play":
+            self.song = self.playlist[-1]
+            self.pl_pos = len(self.playlist) - 1
+            self.play_song()
         # self.song = matching_songs[1]
         # self.play_song()
 
