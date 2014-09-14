@@ -1,18 +1,29 @@
 #!/usr/bin/env python2
-
-from threading import Thread
-from getpass import getpass
-from time import sleep
-import gmusicapi
-import readline
-import random
-import pygst
-import glib
-import gst
-import sys
 import os
+import gi
+import sys
+import glib
+import thread
+import random
+import readline
+import gmusicapi
+import unicodedata
+from time import sleep
+from getpass import getpass
+
+gi.require_version('Gst', '1.0')
+from gi.repository import GObject, Gst
+
+GObject.threads_init()
+glib.threads_init()
+Gst.init(None)
 
 MESSAGE_TIMEOUT = 3  # seconds
+
+def strip_accents(s):
+    nrm = ''.join(c for c in unicodedata.normalize('NFD', s) 
+        if unicodedata.category(c) != 'Mn')
+    return nrm
 
 class GetchUnix:
     """Implements getch for unix systems. Thanks StackOverflow."""
@@ -32,30 +43,24 @@ class GetchUnix:
 
 
 class StreamPlayer:
-    """Handles the control of playbin2 from the gst library."""
-    def __init__(self, URI, main_player):
-        self._player = gst.element_factory_make("playbin2", "player")
-        self.change_song(URI)
-        self.playing = False
-        watcher = Thread(target=self.player_watch_thread, args=(main_player,))
-        watcher.start()
-
-    def player_watch_thread(self, main_player):  # FIXME
-        self.bus = self._player.get_bus()
-        self.bus.add_signal_watch()
-        self.bus.connect("message", main_player.handle_song_end)
-        # glib.MainLoop().run()
+    """Handles the control of playbin2 from the Gst library."""
+    def __init__(self, main_player):
+        self._player = Gst.ElementFactory.make("playbin")  # "player" or None
+        # self.playing = False
+        # self.stop()
 
     def change_song(self, URI):
+        self.stop()
         self._player.set_property('uri', URI)
+        self.play()
 
     def play(self):
         self.playing = True
-        self._player.set_state(gst.STATE_PLAYING)
+        self._player.set_state(Gst.State.PLAYING)
 
     def pause(self):
         self.playing = False
-        self._player.set_state(gst.STATE_PAUSED)
+        self._player.set_state(Gst.State.PAUSED)
 
     def toggle(self):
         if self.playing:
@@ -65,7 +70,7 @@ class StreamPlayer:
 
     def stop(self):
         self.playing = False
-        self._player.set_state(gst.STATE_NULL)
+        self._player.set_state(Gst.State.NULL)
 
 
 def notify(txt):
@@ -95,6 +100,21 @@ def get_device_id(username, password):
             id_file.write(str(device['id']))
 
 
+class TextMenu:
+    def __init__(self, list_items):
+        self.list_items = list_items
+    def show(self):
+        for i, s in enumerate(self.list_items):
+            orig_data = [s['title'], s['artist'], s['album']]
+            data = [str(strip_accents(tag)) for tag in orig_data]
+            print("{}. {} - {} - {}".format(str(i+1), *data))
+        while True:
+            try:
+                return self.list_items[int(raw_input("Choice: ")) - 1]
+            except ValueError:
+                continue
+
+
 class Player:
     def __init__(self, username, password):
         self.device_id = get_device_id(username, password)
@@ -102,7 +122,11 @@ class Player:
         self.password = password
         self.api = gmusicapi.Mobileclient()
         self.logged_in = self.api_login()
+        self.stream_player = StreamPlayer(self)
+        self.stream_player.play()
         self.paused = False
+        self.playlist = []
+        self.pl_pos = 0
         if self.logged_in:
             print("Logged in successfully!")
         else:
@@ -110,90 +134,147 @@ class Player:
             quit()
         self.get_random_song()
 
+    def player_thread(self):
+        bus = self.stream_player._player.get_bus()
+        try:
+            bus.add_signal_watch()
+            bus.connect("message", self.handle_song_end)
+        except:
+            print("Big thing")
+        glib.MainLoop().run()
+
     def beginloop(self):
-        self.play_stream()
+        self.play_song()
+        thread.start_new_thread(self.player_thread, ())
+        
         while True:
             os.system('setterm -cursor off')
-            if not self.paused:
-                try:
-                    s = unicode("\r[Playing] {s[title]} by {s[artist]}".format(
-                                s=self.song))
-                except UnicodeEncodeError:
-                    import unicodedata
-                    def strip_accents(s):
-                        return ''.join(c for c in unicodedata.normalize('NFD', s) 
-                            if unicodedata.category(c) != 'Mn')
-                    s = "\r[Playing] {} by {}".format(
-                            strip_accents(self.song['title']),
-                            strip_accents(self.song['artist']))
-            else:
-                try:
-                    s = unicode("\r[Paused]  {s[title]} by {s[artist]}".format(
-                            s=self.song))
-                except UnicodeEncodeError:
-                    import unicodedata
-                    def strip_accents(s):
-                        return ''.join(c for c in unicodedata.normalize('NFD', s) 
-                            if unicodedata.category(c) != 'Mn')
-                    s = "\r[Paused]  {} by {}".format(
-                            strip_accents(self.song['title']),
-                            strip_accents(self.song['artist']))
-            s += " " * (int(term_width()) - len(s) - 1)
-            sys.stdout.write(s)
-            sys.stdout.flush()
+            self.display_song()
             user_key = getch()
             if user_key == " ":
                 self.paused = not self.paused
                 self.stream_player.toggle()
-            elif user_key == "n":
-                self.stream_player.stop()
+            elif user_key == "z":
                 self.get_random_song()
-                self.play_stream()
-            elif user_key == "s":
-                try:
-                    # Screw x-compatibility.
-                    os.system('setterm -cursor on')
-                    search_text = raw_input("\nSearch: ")
-                    os.system('setterm -cursor off')
-                except (EOFError, KeyboardInterrupt):
-                    continue
-                matching_songs = []
-                for song in self.api.get_all_songs():
-                    if any([search_text.lower() in song['title'].lower(),
-                           search_text.lower() in song['artist'].lower(),
-                           # search_text.lower() in song['album'].lower()
-                           ]):
-                        matching_songs.append(song)
-                        
-                if not matching_songs:
-                    sys.stdout.write("\rNo results found.      ")
-                    sys.stdout.flush()
-                    sleep(MESSAGE_TIMEOUT)
-                    continue
-                self.stream_player.stop()
-                self.song = random.choice(matching_songs)  # FIXME
-                # self.song = matching_songs[1]
-                self.play_stream()
-            elif user_key == "q":
+                self.pl_pos += 1
+                self.play_song()
+            elif user_key == ">":
+                self.next_song()
+            elif user_key == "<":
+                self.previous_song()
+            elif user_key == "Q":
                 break
+            elif user_key == "s":
+                self.search_library()
+
+    def handle_song_end(self, bus, message):
+        if message.type == Gst.MessageType.EOS:
+            self.next_song()
+            self.display_song()  # refresh
+
+    def next_song(self):
+        self.pl_pos += 1
+        try:
+            self.song = self.playlist[self.pl_pos]
+            self.play_song()
+        except IndexError:
+            self.pl_pos -= 1
+
+    def previous_song(self):
+        if self.pl_pos > 0:
+            self.pl_pos -= 1
+            self.song = self.playlist[self.pl_pos]
+            self.play_song()
+
+    def search_library(self):
+        try:
+            # Screw x-compatibility.
+            os.system('setterm -cursor on')
+            search_text = raw_input("\nSearch: ")
+            os.system('setterm -cursor off')
+        except (EOFError, KeyboardInterrupt):
+            return
+        matching_songs = []
+        for song in self.api.get_all_songs():
+            if any([search_text.lower() in song['title'].lower(),
+                   search_text.lower() in song['artist'].lower(),
+                   # search_text.lower() in song['album'].lower()s
+                   ]):
+                matching_songs.append(song)
+                
+        if not matching_songs:
+            sys.stdout.write("\rNo results found.      ")
+            sys.stdout.flush()
+            sleep(MESSAGE_TIMEOUT)
+            return
+        self.playlist.append(TextMenu(matching_songs).show())  # FIXME
+        # self.song = matching_songs[1]
+        # self.play_song()
+
+    def search_all_access(self):
+        try:
+            # Screw x-compatibility.
+            os.system('setterm -cursor on')
+            search_text = raw_input("\nSearch: ")
+            os.system('setterm -cursor off')
+        except (EOFError, KeyboardInterrupt):
+            return
+        matching_songs = self.api.search_all_access(search_text)
+        if not matching_songs:
+            sys.stdout.write("\rNo results found.      ")
+            sys.stdout.flush()
+            sleep(MESSAGE_TIMEOUT)
+            return
+        self.playlist.append(TextMenu(matching_songs).show())  # FIXME
+        # self.song = matching_songs[1]
+        # self.play_song()
+
+
+    def display_song(self):
+        if not self.paused:
+            try:
+                s = unicode("\r[Playing] {s[title]} by {s[artist]}".format(
+                            s=self.song))
+            except UnicodeEncodeError:
+                global strip_accents
+                # Don't remove this, I know it doesn't make sense but the code
+                # breaks without it there. 
+                s = "\r[Playing] {} by {}".format(
+                        strip_accents(self.song['title']),
+                        strip_accents(self.song['artist']))
+        else:
+            try:
+                s = unicode("\r[Paused]  {s[title]} by {s[artist]}".format(
+                        s=self.song))
+            except UnicodeEncodeError:
+                import unicodedata
+                def strip_accents(s):
+                    return ''.join(c for c in unicodedata.normalize('NFD', s) 
+                        if unicodedata.category(c) != 'Mn')
+                s = "\r[Paused]  {} by {}".format(
+                        strip_accents(self.song['title']),
+                        strip_accents(self.song['artist']))
+        s += " " * (int(term_width()) - len(s) - 1)
+        sys.stdout.write(s)
+        sys.stdout.flush()
+
 
     def api_login(self):
         return self.api.login(self.username, self.password)
 
     def play_url(self, stream_url):
-        self.stream_player = StreamPlayer(stream_url, self)
+        self.stream_player.change_song(stream_url)
         self.stream_player.play()
 
     def get_random_song(self):
         all_songs = self.api.get_all_songs()
         self.song = random.choice(all_songs)
+        self.playlist.append(self.song)
 
-    def play_stream(self):
-        stream_url = self.api.get_stream_url(self.song['id'], self.device_id)
-        self.play_url(stream_url)
+    def play_song(self):
+        song_url = self.api.get_stream_url(self.song['id'], self.device_id)
+        self.play_url(song_url)
 
-    def handle_song_end(self):
-        self.get_random_song()
 
 def disable_warnings():
     import requests.packages.urllib3 as urllib3
@@ -204,7 +285,7 @@ def main():
     disable_warnings()
     while True:
         username = raw_input("Username: ")
-        # notify("A password is required to use Google Music.")
+        # # notify("A password is required to use Google Music.")
         password = getpass()
         try:
             player = Player(username, password)
@@ -224,4 +305,8 @@ if __name__ == "__main__":
         from msvcrt import getch
     except ImportError:
         getch = GetchUnix()
-    main()
+    try:
+        main()
+    except Exception:
+        os.system("setterm -cursor on")
+        raise
