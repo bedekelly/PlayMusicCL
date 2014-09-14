@@ -171,7 +171,7 @@ class Player:
             elif user_key == "c":
                 self.playlist = [self.playlist[-1]]
                 self.pl_pos = 0
-            elif user_key = "C":
+            elif user_key == "C":
                 self.playlist = []
                 self.pl_pos = 0
 
