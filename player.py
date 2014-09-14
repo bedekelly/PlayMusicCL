@@ -169,11 +169,12 @@ class Player:
             elif user_key == "s":
                 self.search_library("play")
             elif user_key == "c":
-                self.playlist = [self.playlist[-1]]
-                self.pl_pos = 0
-            elif user_key == "C":
-                self.playlist = []
-                self.pl_pos = 0
+                self.clear_playlist()
+
+
+    def clear_playlist(self):
+        self.playlist = [self.song]
+        self.pl_pos = 0
 
     def handle_song_end(self, bus, message):
         if message.type == Gst.MessageType.EOS:
