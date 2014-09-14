@@ -3,6 +3,8 @@ PlayMusicCL
 
 A command line client for Google Play Music.
 
+###NOTE: This repository is deprecated; all further updates will be at https://github.com/bedekelly/gmus
+
 Goals:
 
 * Build an intuitive GUI to Google Music using Curses
